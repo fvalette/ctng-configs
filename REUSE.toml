@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 H2Lab Development Team
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+SPDX-PackageName = "ctng-configs"
+SPDX-PackageSupplier = "H2Lab"
+SPDX-PackageDownloadLocation = "https://github.com/camelot-os/ctng-configs"
+
+[[annotations]]
+path = "configs/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 H2Lab Development Team"
+SPDX-License-Identifier = "Apache-2.0"

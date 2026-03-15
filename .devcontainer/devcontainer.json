@@ -1,0 +1,8 @@
+
+{
+    "name": "ctng-builder",
+    "image": "mcr.microsoft.com/devcontainers/base:trixie",
+    "features": {
+       "ghcr.io/camelot-os/devcontainer-features/crosstool-ng:1": {}
+    }
+}
