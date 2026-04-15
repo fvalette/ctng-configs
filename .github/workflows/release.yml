@@ -60,6 +60,10 @@ jobs:
 
   build:
     needs: validate
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
     uses: ./.github/workflows/build.yml
     with:
       defconfigs: ${{ format('["{0}"]', needs.validate.outputs.defconfig) }}
