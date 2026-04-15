@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: 2026 H2Lab Development Team
+# SPDX-License-Identifier: Apache-2.0
+
+name: Nightly build
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+
+  # Detect which defconfigs changed since their last nightly tag.
+  # A config is considered changed if:
+  #   - its nightly-<name> tag does not exist yet (first build), or
+  #   - the defconfig file differs between the tag and HEAD.
+  detect_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      defconfigs: ${{ steps.diff.outputs.defconfigs }}
+      has_changes: ${{ steps.diff.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed configs since last nightly
+        id: diff
+        run: |
+          changed=()
+          for defconfig in configs/*.defconfig; do
+            [ -f "$defconfig" ] || continue
+            name=$(basename "${defconfig%.*}")
+            tag="nightly-$name"
+            if git rev-parse "$tag" >/dev/null 2>&1; then
+              if ! git diff --quiet "$tag"..HEAD -- "$defconfig"; then
+                changed+=("$defconfig")
+              fi
+            else
+              # No nightly tag yet — first build for this config
+              changed+=("$defconfig")
+            fi
+          done
+
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo 'defconfigs=[]' >> "$GITHUB_OUTPUT"
+            echo 'has_changes=false' >> "$GITHUB_OUTPUT"
+          else
+            json=$(printf '%s\n' "${changed[@]}" | jq -R . | jq -sc .)
+            echo "defconfigs=$json" >> "$GITHUB_OUTPUT"
+            echo 'has_changes=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.has_changes == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      defconfigs: ${{ needs.detect_changes.outputs.defconfigs }}
+
+  # For each built config, create (or recreate) a nightly pre-release.
+  # The changelog is generated before deleting the old tag so the diff is accurate.
+  release:
+    needs: [detect_changes, build]
+    if: needs.detect_changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        defconfig: ${{ fromJSON(needs.detect_changes.outputs.defconfigs) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Derive target triple
+        id: target
+        run: |
+          filename=${{ matrix.defconfig }}
+          echo "triple=$(basename ${filename%.*})" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.target.outputs.triple }}
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="nightly-${{ steps.target.outputs.triple }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="${TAG}-next" \
+              -f target_commitish="${{ github.sha }}" \
+              -f previous_tag_name="$TAG" \
+              --jq '.body' > release-notes.md
+          else
+            gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="${TAG}-next" \
+              -f target_commitish="${{ github.sha }}" \
+              --jq '.body' > release-notes.md
+          fi
+
+      - name: Delete existing nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="nightly-${{ steps.target.outputs.triple }}"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+      - name: Create nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="nightly-${{ steps.target.outputs.triple }}"
+          gh release create "$TAG" \
+            "${{ steps.target.outputs.triple }}.tar.xz" \
+            --title "Nightly ${{ steps.target.outputs.triple }}" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --target ${{ github.sha }}
