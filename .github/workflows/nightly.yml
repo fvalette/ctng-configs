@@ -58,6 +58,10 @@ jobs:
   build:
     needs: detect_changes
     if: needs.detect_changes.outputs.has_changes == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
     uses: ./.github/workflows/build.yml
     with:
       defconfigs: ${{ needs.detect_changes.outputs.defconfigs }}
