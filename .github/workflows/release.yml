@@ -8,6 +8,12 @@ on:
     tags:
       - 'v*'
 
+# Run release builds sequentially for cache coherency.
+# Note: GitHub Actions queues at most one pending run per concurrency group.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
 
   # Validate the tag format and ensure no duplicate release exists.

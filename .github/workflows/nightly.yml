@@ -8,6 +8,10 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
 jobs:
 
   # Detect which defconfigs changed since their last nightly tag.
