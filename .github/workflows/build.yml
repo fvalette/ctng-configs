@@ -10,6 +10,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
+    inputs:
+      defconfigs:
+        description: 'JSON array of defconfig file paths to build'
+        required: true
+        type: string
 
 env:
   SRC_CACHE: src
@@ -28,11 +34,12 @@ jobs:
       pull-requests: read
     outputs:
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
-      configs: ${{ steps.filter.outputs.configs }}
-      config_files: ${{ steps.filter.outputs.configs_files }}
+      configs: ${{ steps.resolve.outputs.has_configs }}
+      config_files: ${{ steps.resolve.outputs.defconfigs }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
+        if: github.event_name != 'workflow_call'
         id: filter
         with:
           list-files: json
@@ -41,11 +48,20 @@ jobs:
               - '.devcontainer/devcontainer.json'
             configs:
               - 'configs/**'
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            echo 'defconfigs=${{ inputs.defconfigs }}' >> "$GITHUB_OUTPUT"
+            echo 'has_configs=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'defconfigs=${{ steps.filter.outputs.configs_files }}' >> "$GITHUB_OUTPUT"
+            echo 'has_configs=${{ steps.filter.outputs.configs }}' >> "$GITHUB_OUTPUT"
+          fi
 
   # If devcontainer.json file change, rebuild and publish devcontainer prebuilt image
   prebuilt:
     needs: changes
-    if: ${{ needs.changes.outputs.devcontainer == 'true' }}
+    if: ${{ github.event_name != 'workflow_call' && needs.changes.outputs.devcontainer == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -93,13 +109,16 @@ jobs:
           cacheFrom: ghcr.io/camelot-os/prebuilt-ctng-devcontainer
           push: never
           runCmd: |
-            DEFCONFIG=configs/arm-none-eabi.defconfig ct-ng defconfig
-            # patch config for donwload only in cache directory
-            sed -i 's/.*CT_ONLY_DOWNLOAD.*/CT_ONLY_DOWNLOAD=y/' .config
-            sed -i 's/.*CT_LOCAL_TARBALLS_DIR.*/CT_LOCAL_TARBALLS_DIR=${{ env.SRC_CACHE }}/' .config
-            sed -i 's/.*CT_SAVE_TARBALLS.*/CT_SAVE_TARBALLS=y/' .config
-            sed -i 's/.*CT_LOG_PROGRESS_BAR.*/CT_LOG_PROGRESS_BAR=n/' .config
-            ct-ng build
+            defconfigs='${{ needs.changes.outputs.config_files }}'
+            for defconfig in $(echo "$defconfigs" | jq -r '.[]'); do
+              DEFCONFIG=$defconfig ct-ng defconfig
+              # patch config for donwload only in cache directory
+              sed -i 's/.*CT_ONLY_DOWNLOAD.*/CT_ONLY_DOWNLOAD=y/' .config
+              sed -i 's/.*CT_LOCAL_TARBALLS_DIR.*/CT_LOCAL_TARBALLS_DIR=${{ env.SRC_CACHE }}/' .config
+              sed -i 's/.*CT_SAVE_TARBALLS.*/CT_SAVE_TARBALLS=y/' .config
+              sed -i 's/.*CT_LOG_PROGRESS_BAR.*/CT_LOG_PROGRESS_BAR=n/' .config
+              ct-ng build
+            done
       - name: Save cached sources dir
         id: cache-save
         uses: actions/cache/save@v5
@@ -150,5 +169,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
+          name: ${{ steps.target.outputs.triple }}
           path: ${{ steps.target.outputs.triple }}.tar.xz
           archive: false
