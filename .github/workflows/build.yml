@@ -164,6 +164,15 @@ jobs:
             sed -i 's/.*CT_LOCAL_TARBALLS_DIR.*/CT_LOCAL_TARBALLS_DIR=${{ env.SRC_CACHE }}/' .config
             sed -i 's/.*CT_LOG_PROGRESS_BAR.*/CT_LOG_PROGRESS_BAR=n/' .config
             CT_PREFIX=$(pwd) ct-ng build
+
+            CFG=${{ steps.target.outputs.triple }}.txt
+            SBOM_SDPX=${{ steps.target.outputs.triple }}.spdx.json
+            SBOM_CDX=${{ steps.target.outputs.triple }}.cdx.json
+
+            ct-ng show-config > ${CFG}
+            GEN_SBOM_ARGS=--toolchain-name ${{ steps.target.outputs.triple }} --show-config ${CFG}
+            support/generate-sbom ${GEN_SBOM_ARGS} --format spdx --output $ {SBOM_SDPX}
+            support/generate-sbom ${GEN_SBOM_ARGS} --format cyclonedx --output $ {SBOM_CDX}
       - name: TAR produced toolchain
         run: |
           tar cJf ${{ steps.target.outputs.triple }}.tar.xz ${{ steps.target.outputs.triple }}
@@ -172,3 +181,13 @@ jobs:
         with:
           path: ${{ steps.target.outputs.triple }}.tar.xz
           archive: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: show_config
+          path: ${{ steps.target.outputs.triple }}.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sboms
+          path: |
+            ${{ steps.target.outputs.triple }}.spdx.json
+            ${{ steps.target.outputs.triple }}.cdx.json
